@@ -18,8 +18,7 @@ enum ParseMode {
 
 };
 
-
-
+// sectionèÓïÒÇæÇØêÊÇ…éÊìæ
 void getSectionLinePositions(
 	const char* str, size_t len,
 	const std::vector<size_t>& linePositions,
@@ -161,49 +160,49 @@ bool Data::Parse(const char* str, size_t len)
 			case 'D': registerDef.format = FormatType_Decimal; break;
 			case 'B': registerDef.format = FormatType_Binary; break;
 			}
-			if (*ps++ == ' ') {
-				len = lineLen-(ps-pLine);
-				memcpy(buff, ps, len);
-				buff[len] = 0;
-				idxIt = idxMap.find(buff);
-				if (idxIt == idxMap.end()) {
-					break;
-				}
-				registerDef.bitFieldsIdx = bitFieldsDefs_.size();
-				bitFieldsDefs_.resize(registerDef.bitFieldsIdx+1);
-				BitFieldsDef& bitFields = bitFieldsDefs_[registerDef.bitFieldsIdx];
-				size_t beginLine = lineIdxs[idxIt->second] + 1;
-				size_t endLine = lineIdxs[idxIt->second + 1];
-				size_t bfCount = endLine - beginLine;
-				size_t bfIdx = bitFieldDefs_.size();
-				bitFields.bitSlotPos = bfIdx;
-				bitFieldDefs_.resize(bfIdx + bfCount);
-				for (size_t k=0; k<bfCount; ++k) {
-					pLine = &str[linePositions[beginLine+k]];
-					pNextLine = &str[linePositions[beginLine+k+1]];
-					lineLen = (pNextLine-2) - pLine;
-					if (memcmp(pLine, "bit", 3) != 0) {
-						continue;
-					}
-					BitFieldDef& def = bitFieldDefs_[bfIdx + k];
-					def.bitNo = atoi(pLine+3);
-					pEqual = (const char*) memchr(pLine+4, '=', lineLen-4);
-					if (!pEqual) {
-						continue;
-					}
-					StrProxy right(pEqual+1, lineLen-(pEqual+1-pLine));
-					const char* pSpace = (const char*) memchr(right.s_, ' ', right.len_);
-					if (pSpace) {
-						def.name = StrProxy(right.s_, pSpace-right.s_);
-						def.bitLen = atoi(pSpace+1);
-					}else {
-						def.name = right;
-						def.bitLen = 1;
-					}
-					++bitFields.fieldCount;
-				}
+			if (*ps++ != ' ') {
+				continue;
 			}
-
+			len = lineLen-(ps-pLine);
+			memcpy(buff, ps, len);
+			buff[len] = 0;
+			idxIt = idxMap.find(buff);
+			if (idxIt == idxMap.end()) {
+				break;
+			}
+			registerDef.bitFieldsIdx = bitFieldsDefs_.size();
+			bitFieldsDefs_.resize(registerDef.bitFieldsIdx+1);
+			BitFieldsDef& bitFields = bitFieldsDefs_[registerDef.bitFieldsIdx];
+			size_t beginLine = lineIdxs[idxIt->second] + 1;
+			size_t endLine = lineIdxs[idxIt->second + 1];
+			size_t bfCount = endLine - beginLine;
+			size_t bfIdx = bitFieldDefs_.size();
+			bitFields.bitSlotPos = bfIdx;
+			bitFieldDefs_.resize(bfIdx + bfCount);
+			for (size_t k=0; k<bfCount; ++k) {
+				pLine = &str[linePositions[beginLine+k]];
+				pNextLine = &str[linePositions[beginLine+k+1]];
+				lineLen = (pNextLine-2) - pLine;
+				if (memcmp(pLine, "bit", 3) != 0) {
+					continue;
+				}
+				BitFieldDef& def = bitFieldDefs_[bfIdx + k];
+				def.bitNo = atoi(pLine+3);
+				pEqual = (const char*) memchr(pLine+4, '=', lineLen-4);
+				if (!pEqual) {
+					continue;
+				}
+				StrProxy right(pEqual+1, lineLen-(pEqual+1-pLine));
+				const char* pSpace = (const char*) memchr(right.s_, ' ', right.len_);
+				if (pSpace) {
+					def.name = StrProxy(right.s_, pSpace-right.s_);
+					def.bitLen = atoi(pSpace+1);
+				}else {
+					def.name = right;
+					def.bitLen = 1;
+				}
+				++bitFields.fieldCount;
+			}
 		}
 	}
 
