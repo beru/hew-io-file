@@ -1,6 +1,8 @@
 #include "HEWIO.h"
 
 #include <algorithm>
+#include <map>
+#include <string>
 
 #include "misc.h"
 
@@ -16,118 +18,180 @@ enum ParseMode {
 
 };
 
-bool Data::Parse(const char* str, size_t len)
+
+
+void getSectionLinePositions(
+	const char* str, size_t len,
+	const std::vector<size_t>& linePositions,
+	std::vector<size_t>& sectionLineIdxs,
+	std::map<std::string, size_t>& idxMap
+	)
 {
-	const std::vector<size_t> linePositions = GetLinePositions(str, len);
-	size_t nLines = linePositions.size();
-	if (nLines < 2) {
-		return 0;
-	}
+	const size_t nLines = linePositions.size();
 	size_t linePos = linePositions[0];
-	const char* sectionName = 0;
-	size_t sectionNameLen = 0;
-	ParseMode mode = ParseMode_Null;
-
-	ModuleDef* pModule;
-	size_t moduleIdx;
-	BitFieldsDef* pBitFields = 0;
-	size_t bitFieldsIdx;
-
-
+	char buff[256];
 	for (size_t i=0; i<nLines; ++i) {
 		size_t nextLinePos = (i<nLines-1) ? linePositions[i+1] : len;
 		const char* line = &str[linePos];
 		size_t lineLen = nextLinePos - linePos;
 		linePos = nextLinePos;
-		if (line[0] == ';') {
+		if (line[0] != '[') {
 			continue;
-		}else if (line[0] == '[') {
-			const char* pr = std::find(&line[1], &line[lineLen-1], ']');
-			if (!pr) {
-				printf("section name close letter ] was not found at line %d\n", i);
-				return 0;
-			}
-			sectionName = &line[1];
-			sectionNameLen = pr - sectionName;
+		}
+		const char* pr = std::find(&line[1], &line[lineLen-1], ']');
+		if (!pr) {
+			printf("section name close letter ] was not found at line %d\n", i);
+			return;
+		}
+		sectionLineIdxs.push_back(i);
+		memcpy(buff, line+1, pr-line-1);
+		buff[pr-line-1] = 0;
+		std::string str = buff;
+		idxMap.insert(std::make_pair(str, sectionLineIdxs.size()-1));
+	}
+}
 
-			// switch
-			switch (mode) {
-			case ParseMode_Null:
-				mode = ParseMode_Modules;
-				break;
-			case ParseMode_Modules:
-				mode = ParseMode_Module;
-				moduleIdx = 0;
-				pModule = &moduleDefs_[0];
-				break;
-			case ParseMode_Module:
-				if (strncmp(sectionName, "Bit", 3) == 0) {
-					mode = ParseMode_BitFields;
-					bitFieldsIdx = 0;
-				}else {
-					int regCount = pModule->registerSlotPos + pModule->registerCount;
-					++moduleIdx;
-					pModule = &moduleDefs_[moduleIdx];
-					pModule->registerSlotPos = regCount;
-				}
-				break;
-			case ParseMode_BitFields:
-				if (strncmp(sectionName, "Reg", 3) == 0) {
-					mode = ParseMode_Register;
-				}else {
-					++bitFieldsIdx;
-				}
-				break;
-			case ParseMode_Register:
-				
-				break;
-			}
+bool Data::Parse(const char* str, size_t len)
+{
+	moduleDefs_.clear();
+	registerDefs_.clear();
+	bitFieldsDefs_.clear();
+	bitFieldDefs_.clear();
 
-			// regist
-			switch (mode) {
-			case ParseMode_Module:
-				break;
-			case ParseMode_BitFields:
-				{
-					int pos = 0;
-					if (bitFieldsIdx) {
-						pos = pBitFields->bitSlotPos + pBitFields->fieldCount;
-					}
-					BitFieldsDef def;
-					bitFieldsDefs_.push_back(def);
-					pBitFields = &bitFieldsDefs_[bitFieldsIdx];
-					pBitFields->bitSlotPos = pos;
-				}
-				break;
-			case ParseMode_Register:
-				break;
-			}
-		}else {
-			const char* eqPos = (const char*) memchr(line, '=', len);
-			if (!eqPos) {
+	std::vector<size_t> linePositions = GetLinePositions(str, len);
+	linePositions.push_back(len);
+	std::vector<size_t> lineIdxs;
+	std::map<std::string, size_t> idxMap;
+	getSectionLinePositions(str, len, linePositions, lineIdxs, idxMap);
+	
+	std::map<std::string, size_t>::const_iterator idxIt = idxMap.find("Modules");
+	if (idxIt == idxMap.end()) {
+		return false;
+	}
+	size_t idx = idxIt->second;
+	if (idx >= lineIdxs.size()) {
+		return false;
+	}
+	size_t moduleLineIdx = lineIdxs[idx] + 1;
+	size_t modulesCount = lineIdxs[idx+1] - moduleLineIdx;
+	char buff[512];
+	for (size_t i=0; i<modulesCount; ++i) {
+		const char* pLine = &str[linePositions[moduleLineIdx+i]];
+		const char* pNextLine = &str[linePositions[moduleLineIdx+i+1]];
+		size_t lineLen = pNextLine - pLine;
+		if (memcmp(pLine, "Module", 6) != 0) {
+			continue;
+		}
+		const char* pSpace = (const char*) memchr(pLine+6, '=', lineLen-6);
+		if (!pSpace) {
+			continue;
+		}
+		moduleDefs_.resize(moduleDefs_.size()+1);
+		ModuleDef& moduleDef = moduleDefs_[moduleDefs_.size()-1];
+		moduleDef.name = StrProxy(pSpace+1, (pNextLine-2)-(pSpace+1));
+		memcpy(buff, moduleDef.name.s_, moduleDef.name.len_);
+		buff[moduleDef.name.len_] = 0;
+		idxIt = idxMap.find(buff);
+		if (idxIt == idxMap.end()) {
+			continue;
+		}
+		size_t regLineIdx = lineIdxs[idxIt->second] + 1;
+		size_t regCount = lineIdxs[idxIt->second+1] - regLineIdx;
+		moduleDef.registerSlotPos = registerDefs_.size();
+		moduleDef.registerCount = regCount;
+		registerDefs_.resize(moduleDef.registerSlotPos + regCount);
+		for (size_t j=0; j<regCount; ++j) {
+			const char* pLine = &str[linePositions[regLineIdx+j]];
+			const char* pNextLine = &str[linePositions[regLineIdx+j+1]];
+			size_t lineLen = (pNextLine-2) - pLine;
+			const char* pEqual = (const char*) memchr(pLine+4, '=', lineLen-4);
+			if (!pEqual) {
 				continue;
 			}
-			size_t ipos = eqPos - line;
-			StrProxy left(line, ipos);
-			StrProxy right(eqPos+1, lineLen - 2 - (ipos+1));
-			int hoge = 1;
-			switch (mode) {
-			case ParseMode_Modules:
-				if (strncmp("Module", left.s_, 6) == 0) {
-					ModuleDef def;
-					def.name = right;
-					moduleDefs_.push_back(def);
-				}else if (strncmp("FileVersion", left.s_, 11) == 0) {
-					fileVersion_ = atoi(right.s_);
+			const char* name = pEqual+1;
+			size_t len = (pNextLine-2) - (pEqual+1);
+			memcpy(buff, name, len);
+			buff[len] = 0;
+			idxIt = idxMap.find(buff);
+			if (idxIt == idxMap.end()) {
+				continue;
+			}
+			size_t lineIdx = lineIdxs[idxIt->second] + 1;
+			pLine = &str[linePositions[lineIdx]];
+			pNextLine = &str[linePositions[lineIdx+1]];
+			lineLen = (pNextLine-2) - pLine;
+			if (memcmp(pLine, "id=", 3) != 0) {
+				continue;
+			}
+			StrProxy right(pLine+3, lineLen-3);
+			const char* pSpace = (const char*) memchr(right.s_, ' ', right.len_);
+			if (!pSpace) {
+				break;
+			}
+			RegisterDef& registerDef = registerDefs_[moduleDef.registerSlotPos + j];
+			registerDef.id.s_ = pLine + 3;
+			registerDef.id.len_ = pSpace - right.s_;
+			const char* pAddr = pSpace + 1;
+			if (pAddr[0] != '0' || pAddr[1] != 'x') {
+				break;
+			}
+			pSpace = (const char*) memchr(pAddr, ' ', right.len_ - 1 - registerDef.id.len_);
+			if (!pSpace) {
+				break;
+			}
+			registerDef.address = strtoul(pAddr, 0, 16);
+			const char* ps = pSpace + 1;
+			switch (*ps++) {
+			case 'W': registerDef.size = SizeType_Word; break;
+			case 'B': registerDef.size = SizeType_Byte; break;
+			case 'L': registerDef.size = SizeType_Long; break;
+			}
+			if (*ps == ' ') {
+				++ps;
+			}
+			if (*ps++ != 'A') {
+				break;
+			}
+			registerDef.isAbsolute = true;
+			if (*ps == ' ') {
+				++ps;
+			}
+			switch (*ps++) {
+			case 'H': registerDef.format = FormatType_Hex; break;
+			case 'D': registerDef.format = FormatType_Decimal; break;
+			case 'B': registerDef.format = FormatType_Binary; break;
+			}
+			if (*ps++ == ' ') {
+				len = lineLen-(ps-pLine);
+				memcpy(buff, ps, len);
+				buff[len] = 0;
+				idxIt = idxMap.find(buff);
+				if (idxIt == idxMap.end()) {
+					break;
 				}
-				break;
-			case ParseMode_Module:
-				++pModule->registerCount;
-				break;
-			case ParseMode_BitFields:
-				{
-					BitFieldDef def;
-					def.bitNo = atoi(left.s_+3);
+				registerDef.bitFieldsIdx = bitFieldsDefs_.size();
+				bitFieldsDefs_.resize(registerDef.bitFieldsIdx+1);
+				BitFieldsDef& bitFields = bitFieldsDefs_[registerDef.bitFieldsIdx];
+				size_t beginLine = lineIdxs[idxIt->second] + 1;
+				size_t endLine = lineIdxs[idxIt->second + 1];
+				size_t bfCount = endLine - beginLine;
+				size_t bfIdx = bitFieldDefs_.size();
+				bitFields.bitSlotPos = bfIdx;
+				bitFieldDefs_.resize(bfIdx + bfCount);
+				for (size_t k=0; k<bfCount; ++k) {
+					pLine = &str[linePositions[beginLine+k]];
+					pNextLine = &str[linePositions[beginLine+k+1]];
+					lineLen = (pNextLine-2) - pLine;
+					if (memcmp(pLine, "bit", 3) != 0) {
+						continue;
+					}
+					BitFieldDef& def = bitFieldDefs_[bfIdx + k];
+					def.bitNo = atoi(pLine+3);
+					pEqual = (const char*) memchr(pLine+4, '=', lineLen-4);
+					if (!pEqual) {
+						continue;
+					}
+					StrProxy right(pEqual+1, lineLen-(pEqual+1-pLine));
 					const char* pSpace = (const char*) memchr(right.s_, ' ', right.len_);
 					if (pSpace) {
 						def.name = StrProxy(right.s_, pSpace-right.s_);
@@ -136,54 +200,12 @@ bool Data::Parse(const char* str, size_t len)
 						def.name = right;
 						def.bitLen = 1;
 					}
-					bitFieldDefs_.push_back(def);
+					++bitFields.fieldCount;
 				}
-				++pBitFields->fieldCount;
-				break;
-			case ParseMode_Register:
-				if (strncmp(left.s_, "id", 2) == 0) {
-					RegisterDef def;
-					const char* pSpace;
-					pSpace = (const char*) memchr(right.s_, ' ', right.len_);
-					if (!pSpace) {
-						break;
-					}
-					def.id = StrProxy(right.s_, pSpace - right.s_);
-					const char* pAddr = pSpace + 1;
-					if (pAddr[0] != '0' || pAddr[1] != 'x') {
-						break;
-					}
-					pSpace = (const char*) memchr(pAddr, ' ', right.len_ - 1 - def.id.len_);
-					if (!pSpace) {
-						break;
-					}
-					def.address = strtoul(pAddr, 0, 16);
-					switch (pSpace[1]) {
-					case 'W': def.size = SizeType_Word; break;
-					case 'B': def.size = SizeType_Byte; break;
-					case 'L': def.size = SizeType_Long; break;
-					}
-					def.isAbsolute = (pSpace[2] == 'A');
-					switch (pSpace[3]) {
-					case 'H': def.format = FormatType_Hex; break;
-					case 'D': def.format = FormatType_Decimal; break;
-					case 'B': def.format = FormatType_Binary; break;
-					}
-					pSpace = (const char*) memchr(pSpace+3, ' ', (right.s_+right.len_) - (pSpace+3));
-					if (pSpace) {
-						if (strncmp(pSpace+1, "Bit", 3) == 0) {
-							def.bitFieldsIdx = atoi(pSpace+4);
-						}
-					}
-					registerDefs_.push_back(def);
-				}
-				break;
 			}
+
 		}
-		int hoge = 1;
 	}
-	
-	
 
 }
 
@@ -204,7 +226,7 @@ const BitFieldDef* Data::GetBitField(size_t moduleIdx, size_t registerIdx, size_
 {
 	size_t regCount;
 	const RegisterDef* pReg = GetRegister(moduleIdx, regCount) + registerIdx;
-	if (registerIdx >= regCount || pReg->bitFieldsIdx == 0) {
+	if (registerIdx >= regCount || pReg->bitFieldsIdx == -1) {
 		count = 0;
 		return 0;
 	}

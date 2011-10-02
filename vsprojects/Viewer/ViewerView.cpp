@@ -8,6 +8,8 @@
 
 #include "ViewerView.h"
 
+static const size_t BUFFLEN = 512;
+
 BOOL CViewerView::PreTranslateMessage(MSG* pMsg)
 {
 	return CWindow::IsDialogMessage(pMsg);
@@ -16,8 +18,12 @@ BOOL CViewerView::PreTranslateMessage(MSG* pMsg)
 void CViewerView::SetData(HEWIO::Data* pData)
 {
 	m_pData = pData;
+
+	m_wndListModules.ResetContent();
+	m_wndListRegisters.ResetContent();
+	m_wndListBitfields.ResetContent();
 	
-	char buff[64];
+	char buff[BUFFLEN];
 	size_t cnt;
 	const HEWIO::ModuleDef* pDef = m_pData->GetModule(cnt);
 	for (int i=0; i<cnt; ++i) {
@@ -44,7 +50,7 @@ LRESULT CViewerView::OnLbnSelchangeListModules(WORD /*wNotifyCode*/, WORD /*wID*
 	const HEWIO::RegisterDef* pReg = m_pData->GetRegister(idx, cnt);
 	m_wndListRegisters.ResetContent();
 	m_wndListBitfields.ResetContent();
-	char buff[64];
+	char buff[BUFFLEN];
 	for (int i=0; i<cnt; ++i) {
 		memcpy(buff, pReg->id.s_, pReg->id.len_);
 		buff[pReg->id.len_] = 0;
@@ -65,7 +71,7 @@ LRESULT CViewerView::OnLbnSelchangeListRegisters(WORD /*wNotifyCode*/, WORD /*wI
 	if (cnt == 0) {
 		return 0;
 	}
-	char buff[64];
+	char buff[BUFFLEN];
 	for (size_t i=0; i<cnt; ++i) {
 		memcpy(buff, pDef->name.s_, pDef->name.len_);
 		buff[pDef->name.len_] = 0;

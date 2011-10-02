@@ -36,7 +36,7 @@ struct RegisterDef
 {
 	RegisterDef()
 		:
-		bitFieldsIdx(0)
+		bitFieldsIdx(-1)
 	{
 	}
 	StrProxy id;
@@ -44,7 +44,7 @@ struct RegisterDef
 	SizeType size;
 	bool isAbsolute;
 	FormatType format;
-	uint16_t bitFieldsIdx;	// 0 は非ビットフィールド
+	int16_t bitFieldsIdx;	// 0 は非ビットフィールド
 	
 };
 
